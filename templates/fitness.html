@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fitness trend — conditional HR</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --fg: #1a1a1a;
+      --muted: #6b6b6b;
+      --bg: #fafafa;
+      --card: #ffffff;
+      --border: #e3e3e3;
+      --accent: #1f77b4;
+      --good: #2e7d32;
+      --bad: #c62828;
+      --warn: #b07000;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      margin: 0;
+      padding: 32px 16px;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.45;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 22px; margin: 0; font-weight: 600; }
+    .subtitle { color: var(--muted); font-size: 13px; }
+    button {
+      font-family: inherit;
+      font-size: 14px;
+      padding: 8px 18px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    button:hover:not(:disabled) { background: #155a87; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+      min-height: 20px;
+      margin-top: 8px;
+    }
+    .verdict {
+      padding: 10px 14px;
+      border-radius: 4px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      border-left: 3px solid var(--muted);
+      background: #f5f5f5;
+    }
+    .verdict.good { border-color: var(--good); background: #e9f5ea; }
+    .verdict.bad  { border-color: var(--bad);  background: #fbe9e9; }
+    .verdict.warn { border-color: var(--warn); background: #fff5e3; }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stat {
+      padding: 10px 12px;
+      background: #f5f5f5;
+      border-radius: 4px;
+    }
+    .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .stat .val { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    th, td {
+      text-align: right;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    th { font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+    th:first-child, td:first-child { text-align: left; }
+    img.plot {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 4px;
+    }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 12px 0; font-weight: 600; }
+    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; background: #f0f0f0; padding: 2px 5px; border-radius: 3px; }
+    .empty { color: var(--muted); padding: 40px; text-align: center; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Fitness trend — conditional HR</h1>
+        <div class="subtitle">HR ~ const + pace + elev + biweekly fixed effects · HC1 robust SE</div>
+      </div>
+      <div>
+        <button id="updateBtn" onclick="update()">Update</button>
+        <div class="status" id="status"></div>
+      </div>
+    </header>
+
+    <div class="card" id="resultsCard" style="display:none">
+      <div class="verdict" id="verdict"></div>
+
+      <div class="stats-grid" id="stats"></div>
+
+      <h2>Regression coefficients</h2>
+      <table>
+        <thead><tr><th>Term</th><th>Coef</th><th>p-value</th></tr></thead>
+        <tbody id="coefTable"></tbody>
+      </table>
+
+      <h2 style="margin-top:24px">Biweekly fixed effects</h2>
+      <table>
+        <thead><tr><th>Bin start</th><th>n</th><th>Coef (bpm)</th><th>95% CI lo</th><th>95% CI hi</th><th>p-value</th></tr></thead>
+        <tbody id="binTable"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Plot</h2>
+      <img class="plot" id="plot" src="/fitness/plot" alt="Fitness trend plot"
+           onerror="this.style.display='none';document.getElementById('noPlot').style.display='block'">
+      <div class="empty" id="noPlot" style="display:none">No plot yet — click <strong>Update</strong> to fetch data and run the regression.</div>
+    </div>
+  </div>
+
+<script>
+const fmt = (x, d=2) => (x == null || isNaN(x)) ? "—" : Number(x).toFixed(d);
+const pfmt = p => p == null ? "ref" : (p < 0.001 ? "<0.001" : p.toFixed(3));
+
+async function update() {
+  const btn = document.getElementById("updateBtn");
+  const status = document.getElementById("status");
+  btn.disabled = true;
+  status.textContent = "Fetching activities and re-estimating…";
+
+  try {
+    const resp = await fetch("/fitness/update", { method: "POST" });
+    const data = await resp.json();
+    if (data.status !== "ok") throw new Error(data.error || "update failed");
+    render(data.result);
+    document.getElementById("plot").src = "/fitness/plot?t=" + Date.now();
+    document.getElementById("plot").style.display = "block";
+    document.getElementById("noPlot").style.display = "none";
+    status.textContent = "Updated " + new Date().toLocaleString();
+  } catch (e) {
+    status.textContent = "Error: " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function render(r) {
+  document.getElementById("resultsCard").style.display = "block";
+
+  const v = document.getElementById("verdict");
+  v.textContent = r.verdict;
+  v.className = "verdict " + (
+    r.trend.slope_per_month < 0 && r.trend.pvalue < 0.10 ? "good" :
+    r.trend.slope_per_month > 0 && r.trend.pvalue < 0.10 ? "bad" : "warn"
+  );
+
+  document.getElementById("stats").innerHTML = `
+    <div class="stat"><div class="label">Runs</div><div class="val">${r.n_runs}</div></div>
+    <div class="stat"><div class="label">Date range</div><div class="val" style="font-size:13px">${r.date_min} → ${r.date_max}</div></div>
+    <div class="stat"><div class="label">Biweekly bins</div><div class="val">${r.n_bins}</div></div>
+    <div class="stat"><div class="label">R²</div><div class="val">${fmt(r.regression.r_squared, 3)}</div></div>
+    <div class="stat"><div class="label">Trend</div><div class="val">${fmt(r.trend.slope_per_month)} bpm/mo</div></div>
+    <div class="stat"><div class="label">Trend p-value</div><div class="val">${pfmt(r.trend.pvalue)}</div></div>
+  `;
+
+  const reg = r.regression;
+  document.getElementById("coefTable").innerHTML = `
+    <tr><td>Constant</td><td>${fmt(reg.const)}</td><td>—</td></tr>
+    <tr><td>Pace (min/km)</td><td>${fmt(reg.pace_coef)}</td><td>${pfmt(reg.pace_p)}</td></tr>
+    <tr><td>Elevation gain (m)</td><td>${fmt(reg.elev_coef, 3)}</td><td>${pfmt(reg.elev_p)}</td></tr>
+  `;
+
+  document.getElementById("binTable").innerHTML = r.bins.map(b => `
+    <tr>
+      <td>${b.bin}</td>
+      <td>${b.n_runs}</td>
+      <td>${fmt(b.coef)}</td>
+      <td>${fmt(b.lo)}</td>
+      <td>${fmt(b.hi)}</td>
+      <td>${pfmt(b.pvalue)}</td>
+    </tr>
+  `).join("");
+}
+</script>
+</body>
+</html>

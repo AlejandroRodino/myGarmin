@@ -1,4 +1,7 @@
 requests
 pandas
+numpy
 flask
 apscheduler
+matplotlib
+statsmodels

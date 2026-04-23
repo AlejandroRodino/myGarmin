@@ -1,12 +1,12 @@
 """
-Flask server for Strava dashboard with daily auto-refresh.
+Flask server for Strava dashboard + fitness-trend page with daily auto-refresh.
 Designed for Railway deployment.
 """
 
 import os
 import traceback
 
-from flask import Flask, send_file, jsonify
+from flask import Flask, send_file, jsonify, render_template, abort
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -14,6 +14,8 @@ from strava_auth import bootstrap_tokens_from_env
 
 BASE_DIR = os.path.dirname(__file__)
 DASHBOARD_FILE = os.path.join(BASE_DIR, "dashboard.html")
+FITNESS_PLOT = os.path.join(BASE_DIR, "fitness_trend.png")
+PANEL_FILE = os.path.join(BASE_DIR, "runs_panel.csv")
 
 app = Flask(__name__)
 
@@ -42,6 +44,19 @@ def run_pipeline():
         print("[pipeline] Failed — dashboard may be stale.")
 
 
+def run_fitness_update():
+    """Lightweight refresh: just activities + regression. No streams, no dashboard."""
+    bootstrap_tokens_from_env()
+
+    from fetch_runs import fetch_and_save
+    print("[fitness] Fetching activities...")
+    fetch_and_save()
+
+    from fitness_trend import run_analysis
+    print("[fitness] Running regression...")
+    return run_analysis()
+
+
 @app.route("/")
 def index():
     if not os.path.exists(DASHBOARD_FILE):
@@ -51,8 +66,12 @@ def index():
 
 @app.route("/health")
 def health():
-    has_dashboard = os.path.exists(DASHBOARD_FILE)
-    return jsonify({"status": "ok", "dashboard_exists": has_dashboard})
+    return jsonify({
+        "status": "ok",
+        "dashboard_exists": os.path.exists(DASHBOARD_FILE),
+        "panel_exists": os.path.exists(PANEL_FILE),
+        "fitness_plot_exists": os.path.exists(FITNESS_PLOT),
+    })
 
 
 @app.route("/refresh", methods=["POST"])
@@ -61,16 +80,38 @@ def refresh():
     return jsonify({"status": "refreshed"})
 
 
+@app.route("/fitness")
+def fitness_page():
+    return render_template("fitness.html")
+
+
+@app.route("/fitness/plot")
+def fitness_plot():
+    if not os.path.exists(FITNESS_PLOT):
+        abort(404)
+    # Disable caching so the browser sees the freshly-written PNG after each update
+    resp = send_file(FITNESS_PLOT, mimetype="image/png")
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
+
+
+@app.route("/fitness/update", methods=["POST"])
+def fitness_update():
+    try:
+        result = run_fitness_update()
+        return jsonify({"status": "ok", "result": result})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 if __name__ == "__main__":
-    # Bootstrap tokens from env if available (Railway)
     bootstrap_tokens_from_env()
 
-    # Build dashboard on startup if it doesn't exist
     if not os.path.exists(DASHBOARD_FILE):
         print("[startup] No dashboard found, running initial pipeline...")
         run_pipeline()
 
-    # Schedule daily refresh at 06:00 UTC
     scheduler = BackgroundScheduler()
     scheduler.add_job(run_pipeline, "cron", hour=6, minute=0)
     scheduler.start()

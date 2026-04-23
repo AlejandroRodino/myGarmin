@@ -6,7 +6,7 @@ Designed for Railway deployment.
 import os
 import traceback
 
-from flask import Flask, send_file, jsonify, render_template, abort
+from flask import Flask, send_file, jsonify, render_template, abort, redirect, url_for
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -60,7 +60,7 @@ def run_fitness_update():
 @app.route("/")
 def index():
     if not os.path.exists(DASHBOARD_FILE):
-        return "<h2>Dashboard not built yet. Trigger /refresh or wait for scheduled build.</h2>", 503
+        return redirect(url_for("fitness_page"))
     return send_file(DASHBOARD_FILE)
 
 
